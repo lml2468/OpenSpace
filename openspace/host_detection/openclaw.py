@@ -135,3 +135,120 @@ def is_openclaw_host() -> bool:
     # Check if config exists
     return _resolve_openclaw_config_path() is not None
 
+
+# Maps OpenClaw's ``api`` field to litellm model prefix.
+_API_TO_LITELLM_PREFIX: Dict[str, str] = {
+    "anthropic-messages": "anthropic",
+    "openai-chat": "openai",
+    "openai": "openai",
+}
+
+
+def try_read_openclaw_config(model: str) -> Optional[Dict[str, Any]]:
+    """Read LLM credentials from ``~/.openclaw/openclaw.json``.
+
+    OpenClaw stores providers under ``models.providers.<name>`` with fields:
+      - ``apiKey``   → litellm ``api_key``
+      - ``baseUrl``  → litellm ``api_base``
+      - ``api``      → determines litellm model prefix
+                        (``anthropic-messages`` → ``anthropic/``, etc.)
+      - ``models[]`` → available model list
+
+    Default model is resolved from ``agents.defaults.model.primary``
+    (format: ``provider/model-id``, e.g. ``mlamp/claude-opus-4-6``).
+
+    Resolution:
+      1. If *model* is given, extract provider prefix and look it up.
+      2. Otherwise use the default model from agents config.
+      3. Match provider → extract credentials.
+
+    Returns litellm kwargs dict, or None.  May include ``_model`` and
+    ``_forced_provider`` keys for downstream use.
+    """
+    data = _load_openclaw_config()
+    if data is None:
+        return None
+
+    models_section = data.get("models", {})
+    if not isinstance(models_section, dict):
+        return None
+    providers = models_section.get("providers", {})
+    if not isinstance(providers, dict) or not providers:
+        return None
+
+    # --- Resolve default model from agents config ---
+    agents = data.get("agents", {})
+    default_model = ""
+    if isinstance(agents, dict):
+        defaults = agents.get("defaults", {})
+        if isinstance(defaults, dict):
+            model_cfg = defaults.get("model", {})
+            if isinstance(model_cfg, dict):
+                default_model = model_cfg.get("primary", "")
+            elif isinstance(model_cfg, str):
+                default_model = model_cfg
+
+    # --- Determine which provider to use ---
+    target_model = model or default_model or ""
+    provider_name = ""
+    model_id = ""
+
+    if "/" in target_model:
+        # Format: provider/model-id (e.g. mlamp/claude-opus-4-6)
+        provider_name, model_id = target_model.split("/", 1)
+    elif target_model and default_model and "/" in default_model:
+        # Model given without prefix, use default's provider
+        provider_name = default_model.split("/", 1)[0]
+        model_id = target_model
+
+    if not provider_name:
+        # Fallback: first provider with an apiKey
+        for name, prov in providers.items():
+            if isinstance(prov, dict) and prov.get("apiKey"):
+                provider_name = name
+                break
+
+    if not provider_name:
+        return None
+
+    prov_config = providers.get(provider_name)
+    if not isinstance(prov_config, dict):
+        return None
+
+    api_key = prov_config.get("apiKey", "")
+    if not api_key:
+        return None
+
+    result: Dict[str, Any] = {"api_key": api_key}
+
+    base_url = prov_config.get("baseUrl", "")
+    if base_url:
+        result["api_base"] = base_url
+
+    # --- Resolve the litellm-compatible model name ---
+    api_format = prov_config.get("api", "")
+    litellm_prefix = _API_TO_LITELLM_PREFIX.get(api_format, "")
+
+    if model_id:
+        if litellm_prefix:
+            result["_model"] = f"{litellm_prefix}/{model_id}"
+        else:
+            result["_model"] = model_id
+    elif default_model and "/" in default_model:
+        _, default_model_id = default_model.split("/", 1)
+        if litellm_prefix:
+            result["_model"] = f"{litellm_prefix}/{default_model_id}"
+        else:
+            result["_model"] = default_model_id
+
+    logger.info(
+        "Auto-detected LLM credentials from OpenClaw config (%s), "
+        "provider=%r, model=%r, api=%r",
+        _resolve_openclaw_config_path(),
+        provider_name,
+        result.get("_model", ""),
+        api_format,
+    )
+
+    return result
+

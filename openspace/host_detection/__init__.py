@@ -31,6 +31,7 @@ from openspace.host_detection.openclaw import (
     get_openclaw_openai_api_key as _openclaw_get_openai_api_key,
     is_openclaw_host,
     read_openclaw_skill_env,
+    try_read_openclaw_config,
 )
 
 logger = logging.getLogger("openspace.host_detection")
@@ -88,4 +89,5 @@ __all__ = [
     # openclaw-specific (for direct use if needed)
     "is_openclaw_host",
     "read_openclaw_skill_env",
+    "try_read_openclaw_config",
 ]

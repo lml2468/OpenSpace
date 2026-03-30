@@ -38,6 +38,7 @@ def build_llm_kwargs(model: str) -> tuple[str, Dict[str, Any]]:
         ``(resolved_model, llm_kwargs_dict)``
     """
     from openspace.host_detection.nanobot import try_read_nanobot_config
+    from openspace.host_detection.openclaw import try_read_openclaw_config
 
     kwargs: Dict[str, Any] = {}
     resolved_model = model
@@ -45,6 +46,8 @@ def build_llm_kwargs(model: str) -> tuple[str, Dict[str, Any]]:
 
     # --- Tier 2: auto-detect from host config (filled first, may be overridden) ---
     host_config = try_read_nanobot_config(model)
+    if not host_config:
+        host_config = try_read_openclaw_config(model)
     if host_config:
         host_model = host_config.pop("_model", None)
         forced_provider = host_config.pop("_forced_provider", None)
