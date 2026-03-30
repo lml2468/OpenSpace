@@ -215,6 +215,11 @@ def try_read_openclaw_config(model: str) -> Optional[Dict[str, Any]]:
 
     base_url = prov_config.get("baseUrl", "")
     if base_url:
+        # Ensure the base URL ends with /v1 for OpenAI-compatible proxies.
+        # Without it, litellm hits the proxy's dashboard page instead of
+        # the API endpoint (e.g. New API / One API gateways).
+        if not base_url.rstrip("/").endswith("/v1"):
+            base_url = base_url.rstrip("/") + "/v1"
         result["api_base"] = base_url
 
     # --- Resolve model name ---
