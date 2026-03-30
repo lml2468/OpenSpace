@@ -215,25 +215,29 @@ def try_read_openclaw_config(model: str) -> Optional[Dict[str, Any]]:
 
     base_url = prov_config.get("baseUrl", "")
     if base_url:
-        # Ensure the base URL ends with /v1 for OpenAI-compatible proxies.
-        # Without it, litellm hits the proxy's dashboard page instead of
-        # the API endpoint (e.g. New API / One API gateways).
-        if not base_url.rstrip("/").endswith("/v1"):
-            base_url = base_url.rstrip("/") + "/v1"
         result["api_base"] = base_url
 
-    # --- Resolve model name ---
-    # OpenClaw providers typically expose models behind an OpenAI-compatible
-    # proxy (baseUrl + /v1/chat/completions).  We must prefix the model
-    # with ``openai/`` so that litellm uses the OpenAI request format
-    # instead of guessing from the model name (e.g. "claude" → Anthropic
-    # SDK, which would hit the wrong endpoint on the proxy and 404).
+    # --- Resolve model name and api_base adjustment ---
+    # OpenClaw's ``api`` field tells us which SDK format the proxy expects.
+    # - ``anthropic-messages`` → use ``anthropic/`` prefix; SDK adds /v1/messages
+    #   itself, so api_base must NOT have /v1 appended.
+    # - ``openai-chat`` or others → use ``openai/`` prefix; litellm expects
+    #   api_base to end with /v1 for the /chat/completions endpoint.
+    api_format = prov_config.get("api", "")
+
     resolved_model_id = model_id
     if not resolved_model_id and default_model and "/" in default_model:
         resolved_model_id = default_model.split("/", 1)[1]
 
     if resolved_model_id:
-        result["_model"] = f"openai/{resolved_model_id}"
+        if api_format == "anthropic-messages":
+            result["_model"] = f"anthropic/{resolved_model_id}"
+            # Anthropic SDK appends /v1/messages — don't double up
+        else:
+            result["_model"] = f"openai/{resolved_model_id}"
+            # OpenAI format needs /v1 in base URL
+            if base_url and not base_url.rstrip("/").endswith("/v1"):
+                result["api_base"] = base_url.rstrip("/") + "/v1"
 
     logger.info(
         "Auto-detected LLM credentials from OpenClaw config (%s), "
