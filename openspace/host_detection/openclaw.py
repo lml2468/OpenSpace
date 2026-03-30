@@ -218,14 +218,17 @@ def try_read_openclaw_config(model: str) -> Optional[Dict[str, Any]]:
         result["api_base"] = base_url
 
     # --- Resolve model name ---
-    # Use the raw model ID without provider prefix.  OpenClaw providers
-    # expose models behind a custom api_base; litellm routes correctly
-    # with just the model name + api_base, no prefix needed.
-    if model_id:
-        result["_model"] = model_id
-    elif default_model and "/" in default_model:
-        _, default_model_id = default_model.split("/", 1)
-        result["_model"] = default_model_id
+    # OpenClaw providers typically expose models behind an OpenAI-compatible
+    # proxy (baseUrl + /v1/chat/completions).  We must prefix the model
+    # with ``openai/`` so that litellm uses the OpenAI request format
+    # instead of guessing from the model name (e.g. "claude" → Anthropic
+    # SDK, which would hit the wrong endpoint on the proxy and 404).
+    resolved_model_id = model_id
+    if not resolved_model_id and default_model and "/" in default_model:
+        resolved_model_id = default_model.split("/", 1)[1]
+
+    if resolved_model_id:
+        result["_model"] = f"openai/{resolved_model_id}"
 
     logger.info(
         "Auto-detected LLM credentials from OpenClaw config (%s), "
