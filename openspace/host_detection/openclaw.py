@@ -136,14 +136,6 @@ def is_openclaw_host() -> bool:
     return _resolve_openclaw_config_path() is not None
 
 
-# Maps OpenClaw's ``api`` field to litellm model prefix.
-_API_TO_LITELLM_PREFIX: Dict[str, str] = {
-    "anthropic-messages": "anthropic",
-    "openai-chat": "openai",
-    "openai": "openai",
-}
-
-
 def try_read_openclaw_config(model: str) -> Optional[Dict[str, Any]]:
     """Read LLM credentials from ``~/.openclaw/openclaw.json``.
 
@@ -225,29 +217,22 @@ def try_read_openclaw_config(model: str) -> Optional[Dict[str, Any]]:
     if base_url:
         result["api_base"] = base_url
 
-    # --- Resolve the litellm-compatible model name ---
-    api_format = prov_config.get("api", "")
-    litellm_prefix = _API_TO_LITELLM_PREFIX.get(api_format, "")
-
+    # --- Resolve model name ---
+    # Use the raw model ID without provider prefix.  OpenClaw providers
+    # expose models behind a custom api_base; litellm routes correctly
+    # with just the model name + api_base, no prefix needed.
     if model_id:
-        if litellm_prefix:
-            result["_model"] = f"{litellm_prefix}/{model_id}"
-        else:
-            result["_model"] = model_id
+        result["_model"] = model_id
     elif default_model and "/" in default_model:
         _, default_model_id = default_model.split("/", 1)
-        if litellm_prefix:
-            result["_model"] = f"{litellm_prefix}/{default_model_id}"
-        else:
-            result["_model"] = default_model_id
+        result["_model"] = default_model_id
 
     logger.info(
         "Auto-detected LLM credentials from OpenClaw config (%s), "
-        "provider=%r, model=%r, api=%r",
+        "provider=%r, model=%r",
         _resolve_openclaw_config_path(),
         provider_name,
         result.get("_model", ""),
-        api_format,
     )
 
     return result
